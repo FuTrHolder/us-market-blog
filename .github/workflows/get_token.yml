@@ -1,0 +1,43 @@
+name: "🔑 Step 1 - Blogger Refresh Token 발급 (최초 1회)"
+
+# 이 워크플로우는 최초 1회만 수동으로 실행합니다.
+# 실행 후 출력된 Refresh Token을 GitHub Secret에 등록하면 끝입니다.
+on:
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: "Google OAuth Client ID"
+        required: true
+      client_secret:
+        description: "Google OAuth Client Secret"
+        required: true
+
+jobs:
+  get-token:
+    name: "Refresh Token 발급"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "인증 URL 생성"
+        run: |
+          import urllib.parse, textwrap
+
+          client_id = "${{ github.event.inputs.client_id }}"
+          params = {
+              "client_id":     client_id,
+              "redirect_uri":  "urn:ietf:wg:oauth:2.0:oob",
+              "response_type": "code",
+              "scope":         "https://www.googleapis.com/auth/blogger",
+              "access_type":   "offline",
+              "prompt":        "consent",
+          }
+          url = "https://accounts.google.com/o/oauth2/auth?" + urllib.parse.urlencode(params)
+
+          print("=" * 70)
+          print("📋 STEP A: 아래 URL을 브라우저에서 여세요")
+          print("=" * 70)
+          print(url)
+          print("=" * 70)
+          print("📋 STEP B: Google 로그인 후 표시되는 인증 코드를 복사하세요")
+          print("📋 STEP C: 아래 'Step 2' 워크플로우를 실행하면서 코드를 입력하세요")
+          print("=" * 70)
+        shell: python3 {0}
