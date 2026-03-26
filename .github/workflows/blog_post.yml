@@ -1,60 +1,41 @@
-name: US Market Blog — Auto Post (100% Free Stack)
+name: "US Market Blog — Auto Post"
 
 # ============================================================
-# [cron-job.org 외부 트리거 설정 가이드]
+# cron-job.org에서 POST body로 post_type을 전달합니다.
 #
-# 아래 schedule cron과 cron-job.org를 동시에 사용하면
-# 같은 시간에 포스팅이 2번 실행될 수 있습니다.
-# cron-job.org만 사용하려면 schedule 블록을 주석 처리하세요.
-#
-# cron-job.org Job 설정:
-#
-# [아침 포스팅 - KST 08:00]
-#   URL    : https://api.github.com/repos/FuTrHolder/us-market-blog/actions/workflows/blog_post.yml/dispatches
+# [아침 Job 설정] KST 08:00 = UTC 23:00
+#   URL    : https://api.github.com/repos/[유저명]/[레포명]/actions/workflows/blog_post.yml/dispatches
+#   Cron   : 0 23 * * 0,1,2,3,4
 #   Method : POST
-#   Cron   : 0 23 * * 0,1,2,3,4  (UTC 23:00 = KST 08:00, 월~금)
-#   Headers: Authorization: Bearer <GitHub PAT>
-#            Accept: application/vnd.github+json
-#            Content-Type: application/json
+#   Headers:
+#     Authorization: Bearer [GitHub PAT]
+#     Accept: application/vnd.github+json
+#     Content-Type: application/json
 #   Body   : {"ref":"main","inputs":{"post_type":"morning"}}
 #
-# [저녁 포스팅 - KST 22:00]
+# [저녁 Job 설정] KST 22:30 = UTC 13:30
 #   URL    : (위와 동일)
-#   Method : POST
-#   Cron   : 0 13 * * 1,2,3,4,5  (UTC 13:00 = KST 22:00, 월~금)
-#   Headers: (위와 동일)
+#   Cron   : 30 13 * * 1,2,3,4,5
 #   Body   : {"ref":"main","inputs":{"post_type":"evening"}}
-#
-# GitHub PAT 발급:
-#   GitHub → Settings → Developer settings
-#   → Personal access tokens → Tokens (classic)
-#   → Generate new token → workflow 권한 체크
 # ============================================================
 
 on:
-  schedule:
-    # KST 08:00 = UTC 23:00 (전날)  →  미국 증시 마감 리뷰
-    - cron: "0 23 * * 0-4"
-
-    # KST 22:00 = UTC 13:00         →  프리마켓 프리뷰
-    - cron: "0 13 * * 0-4"
-
   workflow_dispatch:
     inputs:
       post_type:
-        description: "실행할 포스트"
+        description: "실행할 포스트 (morning / evening)"
         required: true
         default: "morning"
         type: choice
-        options: [morning, evening, both]
+        options:
+          - morning
+          - evening
 
 jobs:
-  morning-post:
-    name: "Morning — 증시 마감 리뷰"
+  run-post:
+    name: "${{ github.event.inputs.post_type == 'morning' && 'Morning — 증시 마감 리뷰' || 'Evening — 프리마켓 프리뷰' }}"
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'schedule' && github.event.schedule == '0 23 * * 0-4') ||
-      (github.event_name == 'workflow_dispatch' && contains(fromJson('["morning","both"]'), github.event.inputs.post_type))
+
     steps:
       - uses: actions/checkout@v4
 
@@ -70,57 +51,27 @@ jobs:
       - name: 패키지 설치
         run: pip install -r requirements.txt
 
-      - name: Morning Post 실행
+      - name: 포스트 실행 (post_type에 따라 자동 분기)
         env:
           GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_CLIENT_ID:      ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET:  ${{ secrets.GOOGLE_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           BLOGGER_BLOG_ID:       ${{ secrets.BLOGGER_BLOG_ID }}
-        # ✅ 수정 1: 레포 루트에서 실행해야 utils 패키지를 찾을 수 있음
-        # scripts/ 폴더 안에서 실행하면 utils를 못 찾는 문제 발생
-        run: python -m scripts.morning_post
+          POST_TYPE:             ${{ github.event.inputs.post_type }}
+        run: |
+          if [ "$POST_TYPE" = "morning" ]; then
+            echo "▶ 아침 포스팅 실행 (증시 마감 리뷰)"
+            python -m scripts.morning_post
+          else
+            echo "▶ 저녁 포스팅 실행 (프리마켓 프리뷰)"
+            python -m scripts.evening_post
+          fi
 
-      - if: failure()
+      - name: 실패 시 썸네일 업로드 (디버그용)
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: morning-debug
-          path: thumbnails/
-          retention-days: 3
-
-  evening-post:
-    name: "Evening — 프리마켓 프리뷰"
-    runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'schedule' && github.event.schedule == '0 13 * * 0-4') ||
-      (github.event_name == 'workflow_dispatch' && contains(fromJson('["evening","both"]'), github.event.inputs.post_type))
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-
-      - name: 패키지 설치
-        run: pip install -r requirements.txt
-
-      - name: Evening Post 실행
-        env:
-          GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_CLIENT_ID:      ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET:  ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
-          BLOGGER_BLOG_ID:       ${{ secrets.BLOGGER_BLOG_ID }}
-        run: python -m scripts.evening_post
-
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: evening-debug
+          name: debug-${{ github.event.inputs.post_type }}-${{ github.run_id }}
           path: thumbnails/
           retention-days: 3
