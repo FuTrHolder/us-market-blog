@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Morning Post (08:00 KST) — US Market Close Review
-AI: Google Gemini 2.0 Flash (무료, 1,500 req/day)
+AI: Google Gemini 2.5 Flash Lite (무료, 1,500 req/day)
 """
 
 import json
@@ -75,7 +75,7 @@ def run():
         "movers":  get_top_movers(),
     }
 
-    print("Gemini 2.0 Flash로 포스트 생성 중...")
+    print("Gemini 2.5 Flash Lite로 포스트 생성 중...")
     post = parse_json_response(generate_post(build_prompt(market_data)))
     print(f"  제목: {post['title']}")
 
