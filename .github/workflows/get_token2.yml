@@ -1,0 +1,60 @@
+name: "🔑 Step 2 - Refresh Token 완성 (최초 1회)"
+
+# Step 1에서 받은 인증 코드를 여기서 입력합니다.
+on:
+  workflow_dispatch:
+    inputs:
+      auth_code:
+        description: "Step 1에서 받은 인증 코드"
+        required: true
+      client_id:
+        description: "Google OAuth Client ID"
+        required: true
+      client_secret:
+        description: "Google OAuth Client Secret"
+        required: true
+
+jobs:
+  exchange-token:
+    name: "Refresh Token 교환"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Refresh Token 발급"
+        run: |
+          import requests, json
+
+          r = requests.post(
+              "https://oauth2.googleapis.com/token",
+              data={
+                  "code":          "${{ github.event.inputs.auth_code }}",
+                  "client_id":     "${{ github.event.inputs.client_id }}",
+                  "client_secret": "${{ github.event.inputs.client_secret }}",
+                  "redirect_uri":  "urn:ietf:wg:oauth:2.0:oob",
+                  "grant_type":    "authorization_code",
+              }
+          )
+          result = r.json()
+
+          if "refresh_token" in result:
+              print("=" * 70)
+              print("✅ 성공! 아래 값을 GitHub Secrets에 등록하세요")
+              print("=" * 70)
+              print()
+              print(f"Secret 이름: GOOGLE_CLIENT_ID")
+              print(f"Secret 값:   ${{ github.event.inputs.client_id }}")
+              print()
+              print(f"Secret 이름: GOOGLE_CLIENT_SECRET")
+              print(f"Secret 값:   ${{ github.event.inputs.client_secret }}")
+              print()
+              print(f"Secret 이름: BLOGGER_REFRESH_TOKEN")
+              print(f"Secret 값:   {result['refresh_token']}")
+              print()
+              print("=" * 70)
+              print("등록 후 이 워크플로우 파일 2개는 삭제해도 됩니다.")
+          else:
+              print("❌ 오류:", json.dumps(result, indent=2))
+              err = result.get("error", "")
+              if err == "invalid_grant":
+                  print("→ 인증 코드가 만료됐습니다. Step 1부터 다시 실행하세요.")
+              exit(1)
+        shell: python3 {0}
