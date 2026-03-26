@@ -26,23 +26,30 @@ jobs:
       (github.event_name == 'workflow_dispatch' && contains(fromJson('["morning","both"]'), github.event.inputs.post_type))
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
       - name: 패키지 설치
         run: pip install -r requirements.txt
+
       - name: Morning Post 실행
         env:
-          GEMINI_API_KEY:          ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_CLIENT_ID:        ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET:    ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          BLOGGER_REFRESH_TOKEN:   ${{ secrets.BLOGGER_REFRESH_TOKEN }}
-          BLOGGER_BLOG_ID:         ${{ secrets.BLOGGER_BLOG_ID }}
-        run: python scripts/morning_post.py
+          GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CLIENT_ID:      ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET:  ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          BLOGGER_BLOG_ID:       ${{ secrets.BLOGGER_BLOG_ID }}
+        # ✅ 수정 1: 레포 루트에서 실행해야 utils 패키지를 찾을 수 있음
+        # scripts/ 폴더 안에서 실행하면 utils를 못 찾는 문제 발생
+        run: python -m scripts.morning_post
+
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -58,23 +65,28 @@ jobs:
       (github.event_name == 'workflow_dispatch' && contains(fromJson('["evening","both"]'), github.event.inputs.post_type))
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
       - name: 패키지 설치
         run: pip install -r requirements.txt
+
       - name: Evening Post 실행
         env:
-          GEMINI_API_KEY:          ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_CLIENT_ID:        ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET:    ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          BLOGGER_REFRESH_TOKEN:   ${{ secrets.BLOGGER_REFRESH_TOKEN }}
-          BLOGGER_BLOG_ID:         ${{ secrets.BLOGGER_BLOG_ID }}
-        run: python scripts/evening_post.py
+          GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CLIENT_ID:      ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET:  ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          BLOGGER_BLOG_ID:       ${{ secrets.BLOGGER_BLOG_ID }}
+        run: python -m scripts.evening_post
+
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
