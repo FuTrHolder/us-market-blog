@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Gemini API Client — 100% FREE
-Google AI Studio 무료 티어: gemini-2.0-flash (1,500 req/day, 15 RPM)
+Google AI Studio 무료 티어: gemini-2.5-flash-lite (1,500 req/day, 15 RPM)
 API Key: https://aistudio.google.com/app/apikey
 """
 
@@ -12,7 +12,7 @@ import time
 from google import genai
 from google.genai import types
 
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite-preview-06-17"
 
 # ✅ 수정 2: 프롬프트 전송 전 토큰 크기 제한을 위해 데이터 압축 함수 추가
 MAX_DATA_CHARS = 3000  # 프롬프트에 포함할 시장 데이터 최대 문자 수
