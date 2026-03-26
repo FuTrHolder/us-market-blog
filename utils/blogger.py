@@ -93,10 +93,27 @@ def publish_to_blogger(
         "labels":  labels,
     }
 
+    # Blogger API v3: isDraft는 URL 파라미터가 아닌 쿼리 파라미터로 전달
+    # 즉시 발행: /posts/ (기본값이 LIVE)
+    # 임시저장:  /posts/?isDraft=true
     endpoint = f"{BLOGGER_API_BASE}/blogs/{blog_id}/posts/"
-    endpoint += "?isDraft=false" if publish else "?isDraft=true"
+    if not publish:
+        endpoint += "?isDraft=true"
 
     r = requests.post(endpoint, headers=headers, json=post_body, timeout=30)
+
+    if r.status_code == 400:
+        try:
+            err_detail = r.json().get("error", {}).get("message", r.text[:200])
+        except Exception:
+            err_detail = r.text[:200]
+        raise ValueError(
+            f"Blogger API 400 오류 — 잘못된 요청.\n"
+            f"상세: {err_detail}\n"
+            "확인 사항:\n"
+            "  (1) BLOGGER_BLOG_ID가 숫자만 있는지 확인 (URL 아님)\n"
+            "  (2) content HTML에 잘못된 문자 포함 여부 확인"
+        )
 
     if r.status_code == 401:
         raise PermissionError(
