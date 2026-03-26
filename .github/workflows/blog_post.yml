@@ -1,5 +1,36 @@
 name: US Market Blog — Auto Post (100% Free Stack)
 
+# ============================================================
+# [cron-job.org 외부 트리거 설정 가이드]
+#
+# 아래 schedule cron과 cron-job.org를 동시에 사용하면
+# 같은 시간에 포스팅이 2번 실행될 수 있습니다.
+# cron-job.org만 사용하려면 schedule 블록을 주석 처리하세요.
+#
+# cron-job.org Job 설정:
+#
+# [아침 포스팅 - KST 08:00]
+#   URL    : https://api.github.com/repos/FuTrHolder/us-market-blog/actions/workflows/blog_post.yml/dispatches
+#   Method : POST
+#   Cron   : 0 23 * * 0,1,2,3,4  (UTC 23:00 = KST 08:00, 월~금)
+#   Headers: Authorization: Bearer <GitHub PAT>
+#            Accept: application/vnd.github+json
+#            Content-Type: application/json
+#   Body   : {"ref":"main","inputs":{"post_type":"morning"}}
+#
+# [저녁 포스팅 - KST 22:00]
+#   URL    : (위와 동일)
+#   Method : POST
+#   Cron   : 0 13 * * 1,2,3,4,5  (UTC 13:00 = KST 22:00, 월~금)
+#   Headers: (위와 동일)
+#   Body   : {"ref":"main","inputs":{"post_type":"evening"}}
+#
+# GitHub PAT 발급:
+#   GitHub → Settings → Developer settings
+#   → Personal access tokens → Tokens (classic)
+#   → Generate new token → workflow 권한 체크
+# ============================================================
+
 on:
   schedule:
     # KST 08:00 = UTC 23:00 (전날)  →  미국 증시 마감 리뷰
