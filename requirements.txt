@@ -1,0 +1,20 @@
+# ── AI 모델 (완전 무료) ───────────────────────
+google-genai>=1.0.0      # Gemini 1.5 Flash 8B (기본) / 1.5 Flash (폴백)
+                         # 무료: 15 RPM, 1,000 RPD / 신용카드 불필요
+                         # API Key: https://aistudio.google.com/app/apikey
+
+# ── 시장 데이터 (완전 무료) ──────────────────
+yfinance>=0.2.40         # 지수, 섹터, 선물, 실적 캘린더 (Yahoo Finance)
+pandas>=2.0.0            # 데이터 처리 + FRED 공개 CSV 파싱
+
+# ── 썸네일 생성 (완전 무료) ──────────────────
+matplotlib>=3.8.0        # 차트 렌더링 (동적 시장 차트 이미지)
+Pillow>=10.0.0           # 이미지 처리
+numpy>=1.26.0            # 수치 연산
+
+# ── Google Blogger 인증 (완전 무료) ──────────
+requests>=2.31.0         # OAuth Refresh Token → Access Token 교환
+                         # (Refresh Token 방식 — 추가 라이브러리 불필요)
+
+# ── 유틸리티 ─────────────────────────────────
+python-dotenv>=1.0.0     # 로컬 테스트용 .env 파일 지원
