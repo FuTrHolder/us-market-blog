@@ -8,6 +8,11 @@ AI 모델: Google Gemini 2.0 Flash (완전 무료)
 
 import json
 import os
+import sys
+
+# ✅ 수정 2: 레포 루트를 sys.path에 추가 — utils 패키지를 어디서 실행해도 찾을 수 있음
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from datetime import datetime, timezone, timedelta
 
 from utils.gemini_client import generate_post, parse_json_response
