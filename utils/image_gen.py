@@ -4,7 +4,8 @@ Thumbnail Generator — 100% FREE (No OpenAI / No paid API)
 Uses Pillow + matplotlib to programmatically generate professional-looking
 blog thumbnails that reflect actual market data (dynamic charts, real colors).
 
-Output: 1200x628px PNG (standard OG image / blog header size)
+Output: 1200x628px WebP (standard OG image / blog header size)
+WebP format reduces file size by ~30-50% vs PNG with no visible quality loss.
 """
 
 import base64
@@ -17,6 +18,8 @@ import matplotlib
 matplotlib.use("Agg")  # Non-interactive backend
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
+import io
 
 KST = timezone(timedelta(hours=9))
 OUTPUT_DIR = Path("thumbnails")
@@ -36,7 +39,7 @@ GRAY    = "#8899aa"
 def generate_thumbnail(prompt: str, filename: str, market_data: dict = None) -> str:
     """
     Generate a dynamic, data-driven thumbnail using matplotlib only.
-    No paid APIs required.
+    Saves as WebP for smaller file size and faster loading.
 
     Args:
         prompt:      Claude's description (used to infer market direction/tone)
@@ -44,17 +47,35 @@ def generate_thumbnail(prompt: str, filename: str, market_data: dict = None) -> 
         market_data: Real index data dict (optional — enables live values)
 
     Returns:
-        Absolute path to saved PNG
+        Absolute path to saved WebP
     """
     direction, accent = _infer_direction(prompt, market_data)
     fig = _build_figure(filename, direction, accent, market_data)
 
-    output_path = OUTPUT_DIR / f"{filename}.png"
-    fig.savefig(output_path, dpi=150, bbox_inches="tight",
+    # ── PNG 버퍼에 먼저 렌더링 후 Pillow로 WebP 변환 ──────────
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
                 facecolor=DARK_BG, edgecolor="none")
     plt.close(fig)
+    buf.seek(0)
 
-    print(f"✅ Thumbnail (free) saved: {output_path}")
+    img = Image.open(buf).convert("RGB")  # WebP는 RGB 권장
+    output_path = OUTPUT_DIR / f"{filename}.webp"
+    img.save(
+        output_path,
+        format="WEBP",
+        quality=82,        # 82 = 시각적 무손실에 가까운 품질, PNG 대비 ~40% 절감
+        method=4,          # 인코딩 속도/압축률 균형 (0=빠름, 6=최고압축)
+        lossless=False,
+    )
+
+    original_kb = len(buf.getvalue()) / 1024
+    webp_kb     = output_path.stat().st_size / 1024
+    saving_pct  = (1 - webp_kb / original_kb) * 100 if original_kb else 0
+    print(
+        f"✅ Thumbnail (WebP) saved: {output_path}  "
+        f"[PNG≈{original_kb:.0f}KB → WebP≈{webp_kb:.0f}KB, -{saving_pct:.0f}% 절감]"
+    )
     return str(output_path)
 
 
@@ -192,7 +213,7 @@ def _draw_right_panel(ax, filename, direction, accent, market_data):
     _draw_index_rows(ax, market_data, is_morning)
 
     # Brand footer
-    ax.text(0.97, 0.035, "wallstreetdailybriefing.blogspot.com",
+    ax.text(0.97, 0.035, "fund-up.blogspot.com",
             fontsize=6.5, color=GRAY, alpha=0.45, ha="right",
             transform=ax.transAxes, va="center")
 
@@ -230,6 +251,9 @@ def _draw_index_rows(ax, market_data, is_morning):
 
 def thumbnail_to_base64(path: str) -> str:
     """Return base64 data URI for HTML embedding."""
+    suffix = Path(path).suffix.lower()
+    mime   = "image/webp" if suffix == ".webp" else (
+             "image/png"  if suffix == ".png"  else "image/jpeg")
     with open(path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
-    return f"data:image/png;base64,{b64}"
+    return f"data:{mime};base64,{b64}"
