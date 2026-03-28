@@ -2,7 +2,8 @@
 """
 HTML Formatting Utility
 Builds the final HTML for blog posts including:
-- Responsive thumbnail
+- Responsive thumbnail (WebP / PNG / JPEG / SVG)
+- Jump break (<!--more-->) after the first <p> block for Blogger preview
 - Earnings comparison tables
 - Economic indicator tables
 - SEO meta structure
@@ -11,6 +12,7 @@ Builds the final HTML for blog posts including:
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import base64
+import re
 import os
 
 KST = timezone(timedelta(hours=9))
@@ -27,20 +29,22 @@ def build_html_post(
     """
     Assemble the final HTML post with thumbnail, content, and optional tables.
     Blogger strips <head> so we only return the body content.
+
+    점프 브레이크(<!--more-->):
+      - Blogger 목록 화면에서 '더 보기' 미리보기 컷 역할
+      - 각 <h2> 섹션 사이에 삽입하여 목록에서 첫 섹션만 노출
     """
-    
+
     thumbnail_html = _build_thumbnail_html(thumbnail_path)
-    
-    # Inject tables into content if present
+
+    # ── Inject tables into content ──────────────────────────
     final_content = content_html
-    
+
     if earnings_table_html:
-        # Insert after the Earnings section heading
         final_content = final_content.replace(
             '<h2>Earnings in the Spotlight</h2>',
             f'<h2>Earnings in the Spotlight</h2>\n{earnings_table_html}'
         )
-        # Fallback: append at end if section not found
         if earnings_table_html not in final_content:
             final_content += f"\n<h2>Earnings Comparison</h2>\n{earnings_table_html}"
 
@@ -52,7 +56,10 @@ def build_html_post(
         if economic_table_html not in final_content:
             final_content += f"\n<h2>Economic Data</h2>\n{economic_table_html}"
 
-    # Market summary bar (for morning posts)
+    # ── Insert jump breaks between <h2> sections ────────────
+    final_content = _insert_jump_breaks(final_content)
+
+    # ── Market summary bar (morning posts) ──────────────────
     market_bar_html = ""
     if post_type == "morning" and "indices" in market_data:
         market_bar_html = _build_market_summary_bar(market_data["indices"])
@@ -80,7 +87,7 @@ def build_html_post(
 
   <!-- Disclaimer -->
   <div style="margin-top: 40px; padding: 16px 20px; background: #f8f8f8; border-left: 4px solid #ccc; border-radius: 4px; font-size: 13px; color: #666; font-family: Arial, sans-serif;">
-    <strong>Disclaimer:</strong> This post is for informational and educational purposes only. 
+    <strong>Disclaimer:</strong> This post is for informational and educational purposes only.
     Nothing here constitutes financial advice. Always do your own research before making investment decisions.
   </div>
 
@@ -128,28 +135,95 @@ def build_html_post(
     return html
 
 
+# ─────────────────────────────────────────────────────────
+# Jump Break Insertion
+# ─────────────────────────────────────────────────────────
+
+def _insert_jump_breaks(content_html: str) -> str:
+    """
+    Blogger 점프 브레이크(<!--more-->) 삽입.
+
+    전략:
+      - <h2> 태그를 섹션 경계로 인식
+      - 첫 번째 <h2> 이후, 즉 두 번째 <h2> 바로 앞에 <!--more--> 삽입
+        → 목록 화면에서 첫 섹션(Market Overview 등)만 미리 노출
+      - 이후 모든 <h2> 앞에도 <!--more-->를 추가하여 각 섹션이
+        Blogger 관리자의 '점프 브레이크' 단위로 구분됨
+      - 이미 <!--more-->가 존재하면 중복 삽입하지 않음
+
+    참고: Blogger는 <!--more--> 이후 내용을 '더 보기' 뒤로 접음.
+          독자는 포스트 상세 페이지에서 전체 내용을 볼 수 있음.
+    """
+    if "<!--more-->" in content_html:
+        return content_html  # 이미 삽입된 경우 건너뜀
+
+    # <h2> 태그 위치를 모두 찾기 (대소문자 무관)
+    pattern = re.compile(r'(<h2[\s>])', re.IGNORECASE)
+    matches = list(pattern.finditer(content_html))
+
+    if len(matches) < 2:
+        # 섹션이 1개 이하면 맨 끝에 1개만 삽입
+        return content_html + "\n<!--more-->"
+
+    # 두 번째 <h2> 이후의 모든 <h2> 앞에 점프 브레이크 삽입
+    # (역순으로 삽입하여 인덱스 오프셋 문제 방지)
+    result = content_html
+    insert_positions = [m.start() for m in matches[1:]]  # 2번째 h2부터
+
+    for pos in reversed(insert_positions):
+        result = result[:pos] + "\n<!--more-->\n" + result[pos:]
+
+    return result
+
+
+# ─────────────────────────────────────────────────────────
+# Thumbnail
+# ─────────────────────────────────────────────────────────
+
 def _build_thumbnail_html(thumbnail_path: str) -> str:
-    """Return an <img> or <object> tag for the thumbnail."""
+    """
+    Return an <img> tag for the thumbnail.
+    WebP / PNG / JPEG / SVG 모두 지원.
+    WebP는 base64 data URI로 인라인 임베드.
+    """
     if not thumbnail_path or not Path(thumbnail_path).exists():
         return ""
 
     suffix = Path(thumbnail_path).suffix.lower()
 
     if suffix == ".svg":
-        # Inline SVG as base64 data URI
         with open(thumbnail_path, "r") as f:
             svg_data = f.read()
-        b64 = base64.b64encode(svg_data.encode()).decode()
-        src = f"data:image/svg+xml;base64,{b64}"
-    else:
-        # JPEG/PNG as base64
+        b64  = base64.b64encode(svg_data.encode()).decode()
+        src  = f"data:image/svg+xml;base64,{b64}"
+        mime = "image/svg+xml"
+    elif suffix == ".webp":
         with open(thumbnail_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode()
-        mime = "image/jpeg" if suffix in [".jpg", ".jpeg"] else "image/png"
-        src = f"data:{mime};base64,{b64}"
+        src  = f"data:image/webp;base64,{b64}"
+        mime = "image/webp"
+    elif suffix in (".jpg", ".jpeg"):
+        with open(thumbnail_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        src  = f"data:image/jpeg;base64,{b64}"
+        mime = "image/jpeg"
+    else:  # .png 및 기타
+        with open(thumbnail_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        src  = f"data:image/png;base64,{b64}"
+        mime = "image/png"
 
-    return f'<img src="{src}" alt="US Stock Market Analysis" style="width:100%; border-radius:8px; margin-bottom:16px;" loading="lazy"/>'
+    return (
+        f'<img src="{src}" '
+        f'alt="US Stock Market Analysis" '
+        f'style="width:100%; border-radius:8px; margin-bottom:16px;" '
+        f'loading="lazy"/>'
+    )
 
+
+# ─────────────────────────────────────────────────────────
+# Market Summary Bar
+# ─────────────────────────────────────────────────────────
 
 def _build_market_summary_bar(indices: dict) -> str:
     """Build a visual market summary ticker bar."""
@@ -158,17 +232,17 @@ def _build_market_summary_bar(indices: dict) -> str:
 
     items_html = ""
     key_indices = ["S&P 500", "NASDAQ", "Dow Jones", "VIX"]
-    
+
     for name in key_indices:
         data = indices.get(name, {})
         if "error" in data or not data:
             continue
-        
+
         close = data.get("close", "—")
-        chg = data.get("change_pct", 0)
+        chg   = data.get("change_pct", 0)
         arrow = "▲" if chg >= 0 else "▼"
         css_class = "positive" if chg >= 0 else "negative"
-        
+
         items_html += f"""
         <div style="background: #1a2744; padding: 10px 18px; border-radius: 6px; min-width: 140px; text-align: center;">
           <div style="color: #aaa; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">{name}</div>
@@ -187,6 +261,10 @@ def _build_market_summary_bar(indices: dict) -> str:
     """
 
 
+# ─────────────────────────────────────────────────────────
+# Earnings Table
+# ─────────────────────────────────────────────────────────
+
 def build_earnings_table(earnings: list) -> str:
     """
     Build an HTML earnings comparison table.
@@ -198,21 +276,20 @@ def build_earnings_table(earnings: list) -> str:
 
     rows_html = ""
     for e in earnings:
-        symbol = e.get("symbol", "")
-        name = e.get("name", symbol)
-        quarter = e.get("fiscal_quarter", "")[:7]  # e.g. 2024-Q3
+        symbol  = e.get("symbol", "")
+        name    = e.get("name", symbol)
+        quarter = e.get("fiscal_quarter", "")[:7]
         eps_est = _fmt_eps(e.get("eps_estimate"))
         eps_act = _fmt_eps(e.get("eps_actual"))
         rev_est = _fmt_revenue(e.get("revenue_estimate"))
         rev_act = _fmt_revenue(e.get("revenue_actual"))
         time_tag = e.get("time", "")
-        
-        # EPS surprise
+
         surprise_html = "—"
         if e.get("eps_estimate") and e.get("eps_actual"):
             surprise = e["eps_actual"] - e["eps_estimate"]
-            pct = (surprise / abs(e["eps_estimate"])) * 100 if e["eps_estimate"] != 0 else 0
-            css = "positive" if surprise >= 0 else "negative"
+            pct  = (surprise / abs(e["eps_estimate"])) * 100 if e["eps_estimate"] != 0 else 0
+            css  = "positive" if surprise >= 0 else "negative"
             sign = "+" if surprise >= 0 else ""
             surprise_html = f'<span class="{css}">{sign}{pct:.1f}%</span>'
 
@@ -227,19 +304,25 @@ def build_earnings_table(earnings: list) -> str:
           <td>{rev_act}</td>
         </tr>
         """
-        
-        # Historical EPS sub-rows
+
         history = e.get("eps_history", [])
         if history:
             history_cells = ""
             for h in history[:4]:
-                q = h.get("quarter", "")[:7]
-                act = _fmt_eps(h.get("eps_actual"))
-                est = _fmt_eps(h.get("eps_estimate"))
+                q    = h.get("quarter", "")[:7]
+                act  = _fmt_eps(h.get("eps_actual"))
+                est  = _fmt_eps(h.get("eps_estimate"))
                 surp = h.get("surprise_pct")
-                surp_str = f'<span class="{"positive" if (surp or 0) >= 0 else "negative"}">{("+" if (surp or 0) >= 0 else "")}{surp:.1f}%</span>' if surp is not None else "—"
-                history_cells += f'<td style="border-right:1px solid #e0e0e0; padding:6px 10px; font-size:12px"><strong>{q}</strong><br/>A: {act} / E: {est}<br/>{surp_str}</td>'
-            
+                surp_str = (
+                    f'<span class="{"positive" if (surp or 0) >= 0 else "negative"}">'
+                    f'{("+" if (surp or 0) >= 0 else "")}{surp:.1f}%</span>'
+                    if surp is not None else "—"
+                )
+                history_cells += (
+                    f'<td style="border-right:1px solid #e0e0e0; padding:6px 10px; font-size:12px">'
+                    f'<strong>{q}</strong><br/>A: {act} / E: {est}<br/>{surp_str}</td>'
+                )
+
             rows_html += f"""
             <tr style="background:#f9fafb">
               <td colspan="2" style="font-size:12px;color:#888;padding-left:24px">↳ Historical EPS</td>
@@ -270,6 +353,10 @@ def build_earnings_table(earnings: list) -> str:
     """
 
 
+# ─────────────────────────────────────────────────────────
+# Economic Table
+# ─────────────────────────────────────────────────────────
+
 def build_economic_table(events: list) -> str:
     """
     Build an HTML economic indicator comparison table.
@@ -281,20 +368,22 @@ def build_economic_table(events: list) -> str:
     rows_html = ""
     for e in events:
         event_name = e.get("event", "")
-        time_str = str(e.get("date", ""))[-5:] if e.get("date") else ""  # HH:MM
-        prev = _fmt_indicator(e.get("previous"))
-        forecast = _fmt_indicator(e.get("estimate"))
-        actual = _fmt_indicator(e.get("actual"))
-        impact = e.get("impact", "")
-        
-        # Color for impact level
+        time_str   = str(e.get("date", ""))[-5:] if e.get("date") else ""
+        prev       = _fmt_indicator(e.get("previous"))
+        forecast   = _fmt_indicator(e.get("estimate"))
+        actual     = _fmt_indicator(e.get("actual"))
+        impact     = e.get("impact", "")
+
         impact_color = {"High": "#dc2626", "Medium": "#d97706", "Low": "#6b7280"}.get(impact, "#6b7280")
-        
-        # Beat/miss indicator
+
         beat_html = "—"
         if e.get("actual") is not None and e.get("estimate") is not None:
-            diff = float(e["actual"]) - float(e["estimate"])
-            beat_html = f'<span class="positive">Beat ▲</span>' if diff > 0 else f'<span class="negative">Miss ▼</span>'
+            diff      = float(e["actual"]) - float(e["estimate"])
+            beat_html = (
+                '<span class="positive">Beat ▲</span>'
+                if diff > 0 else
+                '<span class="negative">Miss ▼</span>'
+            )
 
         rows_html += f"""
         <tr>
@@ -330,7 +419,9 @@ def build_economic_table(events: list) -> str:
     """
 
 
-# ─── Helpers ───────────────────────────────────
+# ─────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────
 
 def _fmt_eps(value) -> str:
     if value is None:
