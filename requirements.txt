@@ -1,3 +1,4 @@
+# 기존 의존성
 google-genai>=1.0.0
 yfinance>=0.2.40
 pandas>=2.0.0
@@ -6,3 +7,9 @@ Pillow>=10.0.0
 numpy>=1.26.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+
+# 텔레그램 봇 추가 의존성
+newspaper3k>=0.2.8       # 기사 본문 추출 (1순위)
+trafilatura>=1.6.0       # 기사 본문 추출 (2순위 폴백)
+beautifulsoup4>=4.12.0   # HTML 파싱 (3순위 폴백)
+lxml>=4.9.0              # BeautifulSoup 파서 엔진
