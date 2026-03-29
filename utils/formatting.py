@@ -16,6 +16,30 @@ import re
 import os
 
 KST = timezone(timedelta(hours=9))
+# 뉴욕 시간 (EDT: UTC-4, EST: UTC-5) — DST 자동 처리
+# Python 표준 라이브러리는 DST를 지원하지 않으므로
+# 3월 두 번째 일요일 ~ 11월 첫 번째 일요일 = EDT(UTC-4), 나머지 = EST(UTC-5)
+def _get_et_timezone() -> timezone:
+    """미국 동부 시간대(ET) 반환. DST 여부를 날짜 기준으로 판단."""
+    now_utc = datetime.now(timezone.utc)
+    year = now_utc.year
+    # DST 시작: 3월 두 번째 일요일 02:00 ET
+    mar1 = datetime(year, 3, 1, tzinfo=timezone.utc)
+    dst_start = mar1 + timedelta(days=(6 - mar1.weekday()) % 7 + 7)  # 두 번째 일요일
+    dst_start = dst_start.replace(hour=7)  # 02:00 ET = 07:00 UTC
+    # DST 종료: 11월 첫 번째 일요일 02:00 ET
+    nov1 = datetime(year, 11, 1, tzinfo=timezone.utc)
+    dst_end = nov1 + timedelta(days=(6 - nov1.weekday()) % 7)        # 첫 번째 일요일
+    dst_end = dst_end.replace(hour=6)   # 02:00 ET = 06:00 UTC
+    is_dst = dst_start <= now_utc < dst_end
+    return timezone(timedelta(hours=-4 if is_dst else -5))
+
+ET = _get_et_timezone()
+ET_LABEL = "EDT" if ET.utcoffset(None).seconds // 3600 == 20 else (
+           "EDT" if ET == timezone(timedelta(hours=-4)) else "EST"
+)
+# DST 라벨 간소화
+ET_LABEL = "EDT" if ET == timezone(timedelta(hours=-4)) else "EST"
 
 
 def build_html_post(
@@ -64,16 +88,18 @@ def build_html_post(
     if post_type == "morning" and "indices" in market_data:
         market_bar_html = _build_market_summary_bar(market_data["indices"])
 
-    post_date = datetime.now(KST).strftime("%B %d, %Y · %I:%M %p KST")
+    # ── 뉴욕 시간(ET) 기준으로 날짜/시간 표시 ──────────────
+    now_et    = datetime.now(ET)
+    post_date = now_et.strftime(f"%B %d, %Y · %I:%M %p {ET_LABEL}")
 
     html = f"""
-<div class="wsdb-post" style="font-family: 'Georgia', 'Times New Roman', serif; max-width: 860px; margin: 0 auto; color: #1a1a2e; line-height: 1.8;">
+<div class="wsdb-post" style="font-family: 'Georgia', 'Times New Roman', serif; max-width: 860px; margin: 0 auto; color: #e8eaf0; line-height: 1.8; background: transparent;">
 
   <!-- Thumbnail -->
   {thumbnail_html}
 
   <!-- Byline -->
-  <p style="color: #888; font-size: 13px; margin: 8px 0 20px; font-family: Arial, sans-serif;">
+  <p style="color: #9ba8bb; font-size: 13px; margin: 8px 0 20px; font-family: Arial, sans-serif;">
     📅 {post_date} &nbsp;|&nbsp; Wall Street Daily Briefing
   </p>
 
@@ -86,26 +112,39 @@ def build_html_post(
   </div>
 
   <!-- Disclaimer -->
-  <div style="margin-top: 40px; padding: 16px 20px; background: #f8f8f8; border-left: 4px solid #ccc; border-radius: 4px; font-size: 13px; color: #666; font-family: Arial, sans-serif;">
-    <strong>Disclaimer:</strong> This post is for informational and educational purposes only.
+  <div style="margin-top: 40px; padding: 16px 20px; background: rgba(255,255,255,0.06); border-left: 4px solid #4a5568; border-radius: 4px; font-size: 13px; color: #9ba8bb; font-family: Arial, sans-serif;">
+    <strong style="color:#c5cfe0;">Disclaimer:</strong> This post is for informational and educational purposes only.
     Nothing here constitutes financial advice. Always do your own research before making investment decisions.
   </div>
 
 </div>
 
 <style>
+  /* ── 다크 테마 최적화 색상 ── */
+  .wsdb-post p,
+  .wsdb-post li,
+  .wsdb-post span {{
+    color: #dde3ee;
+  }}
   .wsdb-post h2 {{
     font-size: 22px;
     font-weight: bold;
-    color: #0a0f1e;
-    border-bottom: 2px solid #e8e8e8;
+    color: #f0c040;          /* 골드 — 어두운 배경에서 선명하게 */
+    border-bottom: 2px solid rgba(255,255,255,0.12);
     padding-bottom: 6px;
     margin-top: 36px;
   }}
   .wsdb-post h3 {{
     font-size: 18px;
-    color: #1a2744;
+    color: #7eb8f7;          /* 밝은 파랑 — h2와 계층 구분 */
     margin-top: 24px;
+  }}
+  .wsdb-post strong {{
+    color: #e8eaf0;
+  }}
+  .wsdb-post a {{
+    color: #7eb8f7;
+    text-decoration: underline;
   }}
   .wsdb-post table {{
     width: 100%;
@@ -115,21 +154,26 @@ def build_html_post(
     font-size: 14px;
   }}
   .wsdb-post th {{
-    background: #1a2744;
-    color: #FFD700;
+    background: #1e2d4a;
+    color: #f0c040;
     padding: 10px 12px;
     text-align: left;
+    border-bottom: 2px solid #f0c040;
   }}
   .wsdb-post td {{
     padding: 9px 12px;
-    border-bottom: 1px solid #e8e8e8;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    color: #dde3ee;
   }}
   .wsdb-post tr:nth-child(even) td {{
-    background: #f5f7fa;
+    background: rgba(255,255,255,0.04);
   }}
-  .wsdb-post .positive {{ color: #16a34a; font-weight: bold; }}
-  .wsdb-post .negative {{ color: #dc2626; font-weight: bold; }}
-  .wsdb-post .neutral  {{ color: #6b7280; }}
+  .wsdb-post tr:hover td {{
+    background: rgba(126,184,247,0.08);
+  }}
+  .wsdb-post .positive {{ color: #4ade80; font-weight: bold; }}  /* 밝은 녹색 */
+  .wsdb-post .negative {{ color: #f87171; font-weight: bold; }}  /* 밝은 빨강 */
+  .wsdb-post .neutral  {{ color: #94a3b8; }}
 </style>
 """
     return html
@@ -244,9 +288,9 @@ def _build_market_summary_bar(indices: dict) -> str:
         css_class = "positive" if chg >= 0 else "negative"
 
         items_html += f"""
-        <div style="background: #1a2744; padding: 10px 18px; border-radius: 6px; min-width: 140px; text-align: center;">
-          <div style="color: #aaa; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">{name}</div>
-          <div style="color: white; font-size: 18px; font-weight: bold; margin: 2px 0;">{close:,}</div>
+        <div style="background: rgba(30,45,74,0.85); border: 1px solid rgba(255,255,255,0.10); padding: 10px 18px; border-radius: 6px; min-width: 140px; text-align: center;">
+          <div style="color: #9ba8bb; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">{name}</div>
+          <div style="color: #e8eaf0; font-size: 18px; font-weight: bold; margin: 2px 0;">{close:,}</div>
           <div style="font-size: 13px;" class="{css_class}">{arrow} {abs(chg):.2f}%</div>
         </div>
         """
@@ -295,8 +339,8 @@ def build_earnings_table(earnings: list) -> str:
 
         rows_html += f"""
         <tr>
-          <td><strong>{symbol}</strong><br/><span style="font-size:12px;color:#666">{name}</span></td>
-          <td>{quarter}<br/><span style="font-size:11px;color:#888">{time_tag}</span></td>
+          <td><strong style="color:#e8eaf0">{symbol}</strong><br/><span style="font-size:12px;color:#9ba8bb">{name}</span></td>
+          <td style="color:#dde3ee">{quarter}<br/><span style="font-size:11px;color:#9ba8bb">{time_tag}</span></td>
           <td>{eps_est}</td>
           <td>{eps_act}</td>
           <td style="text-align:center">{surprise_html}</td>
@@ -324,8 +368,8 @@ def build_earnings_table(earnings: list) -> str:
                 )
 
             rows_html += f"""
-            <tr style="background:#f9fafb">
-              <td colspan="2" style="font-size:12px;color:#888;padding-left:24px">↳ Historical EPS</td>
+            <tr style="background:rgba(255,255,255,0.03)">
+              <td colspan="2" style="font-size:12px;color:#9ba8bb;padding-left:24px">↳ Historical EPS</td>
               {history_cells}
               <td></td>
             </tr>
@@ -387,8 +431,8 @@ def build_economic_table(events: list) -> str:
 
         rows_html += f"""
         <tr>
-          <td style="font-weight:bold">{event_name}</td>
-          <td style="color:#666;font-size:13px">{time_str} ET</td>
+          <td style="font-weight:bold;color:#dde3ee">{event_name}</td>
+          <td style="color:#9ba8bb;font-size:13px">{time_str} ET</td>
           <td>{prev}</td>
           <td style="font-weight:bold">{forecast}</td>
           <td style="font-weight:bold">{actual}</td>
