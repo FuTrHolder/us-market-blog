@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.gemini_client   import generate_post, parse_json_response
+from utils.fact_checker    import fact_check_with_search
 from utils.article_fetcher import fetch_article
 from utils.post_image      import get_post_image
 from utils.blogger         import publish_to_blogger
@@ -70,7 +71,7 @@ def run_fact_check(url: str, chat_id: str, comment: str, bot: TelegramNotifier):
         "🔍 <b>[2/4] AI fact-checking in progress...</b>"
     )
 
-    fact_result = run_gemini_fact_check(article, comment)
+    fact_result = fact_check_with_search(article, comment)
 
     score        = fact_result.get("credibility_score", 0)
     verdict      = fact_result.get("verdict", "UNKNOWN")
@@ -78,7 +79,10 @@ def run_fact_check(url: str, chat_id: str, comment: str, bot: TelegramNotifier):
     related_info = fact_result.get("related_information", "")
     proceed      = fact_result.get("proceed_to_publish", False)
 
-    score_emoji = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
+    score_emoji   = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
+    grounding_tag = "🔍 실시간 검색 검증" if fact_result.get("grounding_used") else "📚 학습 데이터 검증"
+    sources       = fact_result.get("search_sources", [])
+    source_count  = len(sources)
 
     verdict_map = {
         "VERIFIED":    "✅ Verified",
@@ -92,12 +96,21 @@ def run_fact_check(url: str, chat_id: str, comment: str, bot: TelegramNotifier):
     if issues:
         issues_str = "\n\n⚠️ <b>지적 사항:</b>\n" + "\n".join(f"• {i}" for i in issues[:3])
 
+    sources_str = ""
+    if sources:
+        sources_str = "\n\n🔗 <b>검증 출처:</b>\n" + "\n".join(
+            f"• <a href=\"{s['url']}\">{s.get('title','') or s['url'][:50]}</a>"
+            for s in sources[:3]
+        )
+
     bot.send(chat_id,
         f"📊 <b>[Fact-check Result]</b>\n\n"
         f"{score_emoji} Credibility: <b>{score}/100</b>\n"
         f"Verdict: <b>{verdict_str}</b>\n"
+        f"<i>{grounding_tag}</i> ({source_count}개 출처 확인)\n"
         f"{issues_str}\n\n"
         f"📌 <b>관련 최신 정보:</b>\n{related_info[:400]}"
+        f"{sources_str}"
     )
 
     if not proceed:
@@ -126,44 +139,6 @@ def run_fact_check(url: str, chat_id: str, comment: str, bot: TelegramNotifier):
         encoding="utf-8"
     )
     print(f"[Fact-check] Done — verdict={verdict}, score={score}, proceed={proceed}")
-
-
-def run_gemini_fact_check(article: dict, comment: str) -> dict:
-    today = datetime.now(KST).strftime("%B %d, %Y")
-    title = article.get("title", "")
-    text  = article.get("text", "")[:3000]
-
-    prompt = f"""You are a professional fact-checker for financial and market news.
-
-Today: {today}
-Article Title: {title}
-Article Content (first 3000 chars):
-{text}
-
-{"User comment: " + comment if comment else ""}
-
-TASK: Analyze this article and:
-1. Verify key factual claims (numbers, statistics, company names, dates)
-2. Check for misleading framing or context issues
-3. Search your knowledge for related recent developments
-4. Determine if this is appropriate for a financial blog
-
-OUTPUT — ONLY valid JSON:
-{{
-  "verdict": "VERIFIED|MOSTLY_TRUE|MIXED|UNVERIFIED|FALSE",
-  "credibility_score": <0-100>,
-  "key_claims": [
-    {{"claim": "...", "status": "VERIFIED|FALSE|UNVERIFIABLE", "note": "..."}}
-  ],
-  "issues": ["지적사항1 (한글로 작성)", "지적사항2 (한글로 작성)"],
-  "related_information": "관련 최신 시장 동향 2-3문장 (한글로 작성)",
-  "blog_angle": "Suggested angle/hook for the blog post",
-  "proceed_to_publish": <true if score>=60 and verdict is not FALSE>,
-  "summary_for_blog": "3-4 sentence summary of verified facts for blog writing"
-}}"""
-
-    raw = generate_post(prompt)
-    return parse_json_response(raw)
 
 
 # ─────────────────────────────────────────────────────────
