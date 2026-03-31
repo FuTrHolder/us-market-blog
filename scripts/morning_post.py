@@ -81,11 +81,11 @@ def run():
 
     print("썸네일 생성 중 (Gemini Imagen → Pillow 폴백)...")
     thumb = generate_thumbnail(
-        prompt=post["thumbnail_prompt"],
-        filename=f"morning_{datetime.now(KST).strftime('%Y%m%d')}",
-        market_data=market_data,
-        post_data=post,          # ← 블로그 글 내용 전달 (맥락 기반 프롬프트)
-        post_type="morning",
+         prompt=post["thumbnail_prompt"],
+         filename=f"morning_{datetime.now(KST).strftime('%Y%m%d')}",
+         market_data=market_data,
+         title=post.get("title", ""),
+         tags=post.get("tags", []),
     )
 
     html = build_html_post(
