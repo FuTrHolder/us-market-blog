@@ -25,8 +25,6 @@ KST = timezone(timedelta(hours=9))
 
 def build_prompt(market_data: dict) -> str:
     today = datetime.now(KST).strftime("%B %d, %Y")
-
-    # ✅ 수정 2: 압축된 데이터 사용
     data_summary = compress_market_data(market_data)
 
     has_earnings = bool(market_data.get("earnings_calendar"))
@@ -58,7 +56,9 @@ CONTENT (HTML, 800-1000 words):
 SEO: "pre-market preview", "stock market today", "earnings tonight", "S&P 500 outlook".
 Use hedging language. Do NOT speculate as fact.
 
-THUMBNAIL PROMPT: 1 sentence, max 20 words.
+THUMBNAIL PROMPT: 1 sentence, max 20 words, real-world photorealistic scene (NO charts/text).
+  Good: "Busy trading floor at dawn with monitors and traders preparing for market open"
+  Bad: "Upward arrow with stock market data"
 
 OUTPUT — ONLY valid JSON:
 {{
@@ -102,11 +102,13 @@ def run():
     earnings_tbl = build_earnings_table(earnings) if post.get("has_earnings") and earnings else ""
     economic_tbl = build_economic_table(economic) if post.get("has_economic_data") and economic else ""
 
-    print("썸네일 생성 중...")
+    print("썸네일 생성 중 (Gemini Imagen → Pillow 폴백)...")
     thumb = generate_thumbnail(
         prompt=post["thumbnail_prompt"],
         filename=f"evening_{datetime.now(KST).strftime('%Y%m%d')}",
         market_data={"indices": futures},
+        post_data=post,          # ← 블로그 글 내용 전달
+        post_type="evening",
     )
 
     html = build_html_post(
