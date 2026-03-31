@@ -3,7 +3,7 @@ name: "US Market Blog — Auto Post"
 # ============================================================
 # cron-job.org에서 POST body로 post_type을 전달합니다.
 #
-# [아침 Job 설정] KST 08:00 = UTC 23:00
+# [아침 Job 설정] KST 08:00 = UTC 23:00 (전날)
 #   URL    : https://api.github.com/repos/[유저명]/[레포명]/actions/workflows/blog_post.yml/dispatches
 #   Cron   : 0 23 * * 0,1,2,3,4
 #   Method : POST
@@ -13,8 +13,11 @@ name: "US Market Blog — Auto Post"
 #     Content-Type: application/json
 #   Body   : {"ref":"main","inputs":{"post_type":"morning"}}
 #
+# [오후 Job 설정] KST 16:30 = UTC 07:30  ← 홍콩/아시아 마감 리뷰
+#   Cron   : 30 7 * * 1,2,3,4,5
+#   Body   : {"ref":"main","inputs":{"post_type":"afternoon"}}
+#
 # [저녁 Job 설정] KST 22:30 = UTC 13:30
-#   URL    : (위와 동일)
 #   Cron   : 30 13 * * 1,2,3,4,5
 #   Body   : {"ref":"main","inputs":{"post_type":"evening"}}
 # ============================================================
@@ -23,17 +26,23 @@ on:
   workflow_dispatch:
     inputs:
       post_type:
-        description: "실행할 포스트 (morning / evening)"
+        description: "실행할 포스트 (morning / afternoon / evening)"
         required: true
         default: "morning"
         type: choice
         options:
           - morning
+          - afternoon
           - evening
 
 jobs:
   run-post:
-    name: "${{ github.event.inputs.post_type == 'morning' && 'Morning — 증시 마감 리뷰' || 'Evening — 프리마켓 프리뷰' }}"
+    name: >
+      ${{
+        github.event.inputs.post_type == 'morning'   && 'Morning — 미국 증시 마감 리뷰'   ||
+        github.event.inputs.post_type == 'afternoon' && 'Afternoon — 홍콩/아시아 마감 리뷰' ||
+        'Evening — 프리마켓 프리뷰'
+      }}
     runs-on: ubuntu-latest
 
     steps:
@@ -60,8 +69,11 @@ jobs:
           POST_TYPE:             ${{ github.event.inputs.post_type }}
         run: |
           if [ "$POST_TYPE" = "morning" ]; then
-            echo "▶ 아침 포스팅 실행 (증시 마감 리뷰)"
+            echo "▶ 아침 포스팅 실행 (미국 증시 마감 리뷰)"
             python -m scripts.morning_post
+          elif [ "$POST_TYPE" = "afternoon" ]; then
+            echo "▶ 오후 포스팅 실행 (홍콩/아시아 마감 리뷰)"
+            python -m scripts.afternoon_post
           else
             echo "▶ 저녁 포스팅 실행 (프리마켓 프리뷰)"
             python -m scripts.evening_post
