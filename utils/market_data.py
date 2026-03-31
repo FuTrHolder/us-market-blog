@@ -358,3 +358,139 @@ def get_major_sp500_symbols() -> set:
         "BAC", "WMT", "DIS", "INTC", "CSCO", "GS", "MS", "BA", "CAT",
         "IBM", "GE", "MMM", "VZ", "T",
     }
+
+
+# ─────────────────────────────────────────────────────────
+# HONG KONG / ASIA MARKET DATA (afternoon_post 전용)
+# ─────────────────────────────────────────────────────────
+
+def get_asia_market_data() -> dict:
+    """아시아 주요 지수 + HSI 관련 ETF/선물 데이터"""
+    symbols = {
+        # 홍콩
+        "Hang Seng Index":      "^HSI",
+        "Hang Seng Tech":       "^HSTECH",
+        # 중국 본토
+        "Shanghai Composite":   "000001.SS",
+        "Shenzhen Component":   "399001.SZ",
+        "CSI 300":              "000300.SS",
+        # 기타 아시아
+        "Nikkei 225 (Japan)":   "^N225",
+        "KOSPI (Korea)":        "^KS11",
+        "ASX 200 (Australia)":  "^AXJO",
+        "Taiwan Weighted":      "^TWII",
+        # 홍콩 달러 / 위안
+        "USD/HKD":              "USDHKD=X",
+        "USD/CNY":              "USDCNY=X",
+        # 관련 원자재
+        "Gold":                 "GC=F",
+        "Brent Oil":            "BZ=F",
+    }
+    return _fetch_yf_batch(symbols, period="5d")
+
+
+def get_hsi_sector_performance() -> dict:
+    """홍콩 섹터 ETF 및 주요 테마 성과"""
+    sectors = {
+        "HK Financials":        "3033.HK",   # CSOP HS Finance
+        "HK Tech (iShares)":    "2804.HK",   # iShares HS Tech
+        "China Consumer":       "3032.HK",
+        "China Healthcare":     "2828.HK",   # Hang Seng H-Share
+        "HK Real Estate":       "823.HK",    # Link REIT (proxy)
+    }
+    raw = _fetch_yf_batch(sectors, period="5d")
+    return {k: {"ticker": sectors[k], "change_pct": v.get("change_pct")}
+            for k, v in raw.items() if "error" not in v}
+
+
+# HSI 주요 구성종목 (시총 기준 상위)
+HSI_MAJOR_TICKERS = {
+    "0700.HK",  # Tencent
+    "9988.HK",  # Alibaba
+    "3690.HK",  # Meituan
+    "1299.HK",  # AIA
+    "0005.HK",  # HSBC
+    "0388.HK",  # HK Exchanges
+    "2318.HK",  # Ping An Insurance
+    "0939.HK",  # CCB
+    "1398.HK",  # ICBC
+    "0941.HK",  # China Mobile
+    "2020.HK",  # ANTA Sports
+    "0027.HK",  # Galaxy Entertainment
+    "9999.HK",  # NetEase
+    "0857.HK",  # PetroChina
+    "2382.HK",  # Sunny Optical
+    "1810.HK",  # Xiaomi
+    "0016.HK",  # Sun Hung Kai
+    "0002.HK",  # CLP Holdings
+    "0003.HK",  # HK & China Gas
+    "1177.HK",  # Sino Biopharm
+}
+
+_HSI_COMPANY_NAMES = {
+    "0700.HK": "Tencent",
+    "9988.HK": "Alibaba",
+    "3690.HK": "Meituan",
+    "1299.HK": "AIA Group",
+    "0005.HK": "HSBC",
+    "0388.HK": "HKEX",
+    "2318.HK": "Ping An",
+    "0939.HK": "CCB",
+    "1398.HK": "ICBC",
+    "0941.HK": "China Mobile",
+    "2020.HK": "ANTA Sports",
+    "9999.HK": "NetEase",
+    "0857.HK": "PetroChina",
+    "1810.HK": "Xiaomi",
+    "0016.HK": "Sun Hung Kai",
+}
+
+
+def get_hsi_top_movers(n: int = 5) -> dict:
+    """HSI 주요 구성종목 상승/하락 Top N"""
+    watchlist = list(HSI_MAJOR_TICKERS)
+    result    = {"gainers": [], "losers": []}
+
+    try:
+        raw = yf.download(
+            watchlist,
+            period      = "5d",
+            group_by    = "ticker",
+            auto_adjust = True,
+            progress    = False,
+            threads     = True,
+        )
+
+        changes = []
+        for sym in watchlist:
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    close_col = (sym, "Close") if (sym, "Close") in raw.columns else None
+                    if close_col is None:
+                        continue
+                    hist = raw[close_col].dropna()
+                else:
+                    hist = raw["Close"].dropna() if len(watchlist) == 1 else None
+                    if hist is None:
+                        continue
+
+                if len(hist) < 2:
+                    continue
+                pct = (hist.iloc[-1] - hist.iloc[-2]) / hist.iloc[-2] * 100
+                changes.append({
+                    "symbol":     sym,
+                    "name":       _HSI_COMPANY_NAMES.get(sym, sym),
+                    "change_pct": round(float(pct), 2),
+                    "price":      round(float(hist.iloc[-1]), 2),
+                })
+            except Exception:
+                continue
+
+        changes.sort(key=lambda x: x["change_pct"], reverse=True)
+        result["gainers"] = changes[:n]
+        result["losers"]  = changes[-n:][::-1]
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
