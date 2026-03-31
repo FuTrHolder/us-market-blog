@@ -107,8 +107,8 @@ def run():
         prompt=post["thumbnail_prompt"],
         filename=f"evening_{datetime.now(KST).strftime('%Y%m%d')}",
         market_data={"indices": futures},
-        post_data=post,          # ← 블로그 글 내용 전달
-        post_type="evening",
+        title=post.get("title", ""),
+        tags=post.get("tags", []),
     )
 
     html = build_html_post(
