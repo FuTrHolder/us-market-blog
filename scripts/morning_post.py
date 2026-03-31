@@ -23,8 +23,6 @@ KST = timezone(timedelta(hours=9))
 
 def build_prompt(market_data: dict) -> str:
     today = datetime.now(KST).strftime("%B %d, %Y")
-
-    # ✅ 수정 2: 전체 JSON 대신 압축된 텍스트 사용 → 토큰 절약
     data_summary = compress_market_data(market_data)
 
     return f"""You are a professional US stock market analyst writing an SEO-optimized English blog post for retail investors.
@@ -52,7 +50,9 @@ CONTENT (HTML, 800-1000 words):
 SEO keywords: "stock market today", "S&P 500", "Wall Street", "market analysis".
 Use hedging language. Do NOT speculate as fact.
 
-THUMBNAIL PROMPT: 1 sentence, max 20 words — professional financial thumbnail.
+THUMBNAIL PROMPT: 1 sentence, max 20 words, real-world photorealistic scene (NO charts/text).
+  Good: "Traders on a busy New York Stock Exchange floor watching screens intently"
+  Bad: "Financial chart with upward green trend lines"
 
 OUTPUT — ONLY valid JSON:
 {{
@@ -79,11 +79,13 @@ def run():
     post = parse_json_response(generate_post(build_prompt(market_data)))
     print(f"  제목: {post['title']}")
 
-    print("썸네일 생성 중...")
+    print("썸네일 생성 중 (Gemini Imagen → Pillow 폴백)...")
     thumb = generate_thumbnail(
         prompt=post["thumbnail_prompt"],
         filename=f"morning_{datetime.now(KST).strftime('%Y%m%d')}",
         market_data=market_data,
+        post_data=post,          # ← 블로그 글 내용 전달 (맥락 기반 프롬프트)
+        post_type="morning",
     )
 
     html = build_html_post(
