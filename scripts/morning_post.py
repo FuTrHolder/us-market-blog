@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone, timedelta
 from utils.gemini_client import generate_post, parse_json_response, compress_market_data
 from utils.market_data import get_market_close_data, get_sector_performance, get_top_movers
-from utils.image_gen import generate_thumbnail
+from utils.post_image import get_post_image
 from utils.blogger import publish_to_blogger
 from utils.formatting import build_html_post
 
@@ -79,13 +79,13 @@ def run():
     post = parse_json_response(generate_post(build_prompt(market_data)))
     print(f"  제목: {post['title']}")
 
-    print("썸네일 생성 중 (Gemini Imagen → Pillow 폴백)...")
-    thumb = generate_thumbnail(
-         prompt=post["thumbnail_prompt"],
-         filename=f"morning_{datetime.now(KST).strftime('%Y%m%d')}",
-         market_data=market_data,
-         title=post.get("title", ""),
-         tags=post.get("tags", []),
+    print("썸네일 생성 중 (Nano Banana 2 → Pillow 폴백)...")
+    thumb = get_post_image(
+        post_data   = post,
+        article     = {},
+        filename    = f"morning_{datetime.now(KST).strftime('%Y%m%d')}",
+        post_type   = "morning",
+        market_data = market_data,
     )
 
     html = build_html_post(
