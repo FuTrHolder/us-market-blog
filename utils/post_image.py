@@ -118,6 +118,8 @@ def get_post_image(
         prompt=prompt,
         filename=filename,
         market_data=None,
+        title=post_data.get("title", ""),
+        tags=post_data.get("tags", []),
     )
 
 
