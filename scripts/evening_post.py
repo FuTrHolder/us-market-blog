@@ -16,7 +16,7 @@ from utils.market_data import (
     get_premarket_data, get_market_futures,
     get_earnings_calendar, get_economic_calendar,
 )
-from utils.image_gen import generate_thumbnail
+from utils.post_image import get_post_image
 from utils.blogger import publish_to_blogger
 from utils.formatting import build_html_post, build_earnings_table, build_economic_table
 
@@ -102,13 +102,13 @@ def run():
     earnings_tbl = build_earnings_table(earnings) if post.get("has_earnings") and earnings else ""
     economic_tbl = build_economic_table(economic) if post.get("has_economic_data") and economic else ""
 
-    print("썸네일 생성 중 (Gemini Imagen → Pillow 폴백)...")
-    thumb = generate_thumbnail(
-        prompt=post["thumbnail_prompt"],
-        filename=f"evening_{datetime.now(KST).strftime('%Y%m%d')}",
-        market_data={"indices": futures},
-        title=post.get("title", ""),
-        tags=post.get("tags", []),
+    print("썸네일 생성 중 (Nano Banana 2 → Pillow 폴백)...")
+    thumb = get_post_image(
+        post_data   = post,
+        article     = {},
+        filename    = f"evening_{datetime.now(KST).strftime('%Y%m%d')}",
+        post_type   = "evening",
+        market_data = {"indices": futures},
     )
 
     html = build_html_post(
