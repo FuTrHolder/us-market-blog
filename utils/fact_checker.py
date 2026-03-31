@@ -1,43 +1,36 @@
 #!/usr/bin/env python3
 """
 utils/fact_checker.py
-실시간 팩트체크 — Gemini 2.5 Flash + Google Search Grounding
+실시간 팩트체크 — 2단계 분리 방식
 
-기존 Gemini 팩트체크의 한계:
-  - 학습 데이터 컷오프 이후 실시간 정보 모름
-  - 최신 주가, 실적 발표, 금리 결정 등 검증 불가
+[문제 원인]
+  Search Grounding 활성화 시 Gemini 응답 구조가 달라짐:
+  - response.text 가 None 또는 검색 설명 텍스트 혼재 반환
+  - response_mime_type="application/json" 을 Grounding과 동시에 사용 불가
+  → JSON 파싱 실패로 "응답 파싱 오류" 발생
 
-개선 방법:
-  - google_search 툴을 활성화하여 팩트체크 시에만 실시간 웹 검색 수행
-  - 기사 핵심 주장을 추출 → 각 주장을 검색으로 교차 검증
-  - 검색 결과 출처(grounding chunks)를 신뢰도 점수에 반영
+[해결: 2단계 분리]
+  1단계 (Grounding 호출): Google 검색으로 관련 최신 정보 수집
+                          → 순수 텍스트 응답, JSON 강제 안 함
+  2단계 (JSON 호출):      수집된 검색 컨텍스트 + 기사 내용으로
+                          structured JSON 팩트체크 결과 생성
+                          → response_mime_type="application/json" 사용 가능
 
-무료 사용:
-  - 기존 GEMINI_API_KEY 그대로 사용 (추가 키 불필요)
-  - Gemini 2.5 Flash-Lite: 무료 티어 1,500 req/day
-  - Search Grounding: Gemini 2.5 이하 모델은 프롬프트당 과금
-    → 단, 무료 티어(Free tier)에서는 무료로 사용 가능
-  - 팩트체크는 기사당 1회 호출이므로 일일 한도 내 충분히 사용 가능
-
-구조:
-  1. 1단계: 기사에서 핵심 주장 추출 (Search Grounding 없이, 토큰 절약)
-  2. 2단계: 핵심 주장을 Google Search Grounding으로 실시간 검증
-  3. 3단계: 검증 결과 종합 → 신뢰도 점수 + 판정
+[무료 사용]
+  - 기존 GEMINI_API_KEY 그대로 사용
+  - Gemini 2.5 Flash-Lite: 무료 1,500 req/day
+  - 기사당 API 호출 2회 (1단계 + 2단계)
 """
 
 import json
 import os
 import re
-import time
 from datetime import datetime, timezone, timedelta
 
 from google import genai
 from google.genai import types
 
-KST = timezone(timedelta(hours=9))
-
-# ── 모델 설정 ──────────────────────────────────────────────
-# Search Grounding은 gemini-2.5-flash-lite 에서 무료 티어 사용 가능
+KST              = timezone(timedelta(hours=9))
 FACT_CHECK_MODEL = "gemini-2.5-flash-lite"
 
 
@@ -54,150 +47,144 @@ def get_client() -> genai.Client:
 
 def fact_check_with_search(article: dict, comment: str = "") -> dict:
     """
-    Google Search Grounding을 활용한 실시간 팩트체크.
-
-    Args:
-        article: fetch_article() 결과 dict
-        comment: 사용자 추가 코멘트
+    2단계 실시간 팩트체크.
+    1단계: Google Search Grounding으로 관련 정보 수집
+    2단계: 수집 결과 기반 JSON 팩트체크 생성
 
     Returns:
         {
-          "verdict": "VERIFIED|MOSTLY_TRUE|MIXED|UNVERIFIED|FALSE",
-          "credibility_score": 0-100,
-          "key_claims": [...],
-          "issues": [...],           # 한글
-          "related_information": "", # 한글
-          "blog_angle": "",
-          "proceed_to_publish": bool,
-          "summary_for_blog": "",
-          "search_sources": [...],   # 검색에서 찾은 출처 URL 목록
-          "grounding_used": bool,    # Search Grounding 사용 여부
+          "verdict", "credibility_score", "key_claims",
+          "issues"(한글), "related_information"(한글),
+          "blog_angle", "proceed_to_publish", "summary_for_blog",
+          "search_sources": [...],
+          "grounding_used": bool,
         }
     """
     title = article.get("title", "")
     text  = article.get("text", "")[:3000]
     today = datetime.now(KST).strftime("%B %d, %Y")
 
-    print("[팩트체크] Google Search Grounding으로 실시간 검증 시작...")
+    # ── 1단계: Search Grounding으로 컨텍스트 수집 ────────
+    print("[팩트체크] 1단계: Google Search로 실시간 정보 수집 중...")
+    search_context, search_sources, grounding_used = _collect_search_context(
+        title, text, today
+    )
 
-    # ── 1단계: Search Grounding으로 실시간 팩트체크 ─────────
+    # ── 2단계: 수집된 컨텍스트로 JSON 팩트체크 생성 ──────
+    print(f"[팩트체크] 2단계: 팩트체크 JSON 생성 중... "
+          f"(검색 컨텍스트: {len(search_context)}자)")
     try:
-        result = _run_grounded_fact_check(title, text, today, comment)
-        result["grounding_used"] = True
-        print(f"[팩트체크] Search Grounding 완료 — score={result.get('credibility_score')}, "
-              f"sources={len(result.get('search_sources', []))}")
+        result = _generate_fact_check_json(
+            title, text, today, comment, search_context
+        )
+        result["search_sources"]  = search_sources
+        result["grounding_used"]  = grounding_used
+        print(f"[팩트체크] 완료 — verdict={result.get('verdict')}, "
+              f"score={result.get('credibility_score')}, "
+              f"sources={len(search_sources)}")
         return result
 
     except Exception as e:
-        err = str(e)
-        print(f"[팩트체크] Search Grounding 실패: {err[:150]}")
-        print("[팩트체크] 폴백: 기존 Gemini 팩트체크로 전환...")
-
-        # ── 폴백: Search Grounding 없이 기존 방식 ────────────
-        try:
-            result = _run_basic_fact_check(title, text, today, comment)
-            result["grounding_used"] = False
-            result["search_sources"] = []
-            return result
-        except Exception as e2:
-            print(f"[팩트체크] 기본 팩트체크도 실패: {e2}")
-            # 최소 결과 반환 (게시 중단)
-            return {
-                "verdict": "UNVERIFIED",
-                "credibility_score": 0,
-                "key_claims": [],
-                "issues": ["팩트체크 API 오류로 검증 불가"],
-                "related_information": "검증 중 오류가 발생했습니다.",
-                "blog_angle": "",
-                "proceed_to_publish": False,
-                "summary_for_blog": "",
-                "search_sources": [],
-                "grounding_used": False,
-            }
+        print(f"[팩트체크] 2단계 실패: {e}")
+        return _fallback_result(str(e))
 
 
 # ─────────────────────────────────────────────────────────
-# 1단계: Google Search Grounding 팩트체크
+# 1단계: Search Grounding으로 컨텍스트 수집
 # ─────────────────────────────────────────────────────────
 
-def _run_grounded_fact_check(
+def _collect_search_context(
     title: str,
     text: str,
     today: str,
-    comment: str,
-) -> dict:
+) -> tuple[str, list, bool]:
     """
-    google_search 툴을 활성화해서 실시간으로 팩트체크.
-    Gemini가 필요하다고 판단할 때 자동으로 Google 검색을 수행.
+    Google Search Grounding으로 기사 관련 최신 정보를 텍스트로 수집.
+    JSON 강제 없이 자유로운 텍스트 응답 → 파싱 오류 없음.
+
+    Returns:
+        (search_context_text, sources_list, grounding_used)
     """
     client = get_client()
 
-    prompt = f"""You are a professional real-time fact-checker for financial and market news.
-Today's date: {today}
-
-Article Title: {title}
-Article Content:
-{text}
-{"User comment: " + comment if comment else ""}
-
-IMPORTANT: Use Google Search to verify the following:
-1. Search for the article's KEY CLAIMS (company names, stock prices, earnings figures, economic data, Fed decisions)
-2. Cross-reference with multiple recent sources
-3. Check if numbers/statistics match what's reported elsewhere TODAY
-4. Identify any claims that contradict current real-world data
-
-After searching, provide your fact-check result.
-
-OUTPUT — ONLY valid JSON (no markdown, no explanation outside JSON):
-{{
-  "verdict": "VERIFIED|MOSTLY_TRUE|MIXED|UNVERIFIED|FALSE",
-  "credibility_score": <integer 0-100>,
-  "key_claims": [
-    {{"claim": "exact claim from article", "status": "VERIFIED|FALSE|UNVERIFIABLE", "search_note": "what search found"}}
-  ],
-  "issues": ["지적사항1 (한글로 작성)", "지적사항2 (한글로 작성)"],
-  "related_information": "검색으로 확인된 관련 최신 시장 동향 2-3문장 (한글로 작성)",
-  "blog_angle": "Suggested angle/hook for the blog post in English",
-  "proceed_to_publish": <true if credibility_score >= 60 and verdict != "FALSE">,
-  "summary_for_blog": "3-4 sentence summary of verified facts in English for blog writing"
-}}"""
-
-    # ── Search Grounding 활성화 ───────────────────────────
-    grounding_tool = types.Tool(google_search=types.GoogleSearch())
-
-    response = client.models.generate_content(
-        model=FACT_CHECK_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            tools=[grounding_tool],
-            temperature=0.1,          # 팩트체크는 낮은 temperature 권장
-            max_output_tokens=2048,
-        ),
+    prompt = (
+        f"Today is {today}.\n\n"
+        f"I need to fact-check this financial news article:\n"
+        f"Title: {title}\n\n"
+        f"Please search Google for:\n"
+        f"1. Current status of the main claims in this article\n"
+        f"2. Recent news about the companies/events mentioned\n"
+        f"3. Any contradicting or supporting information published today\n\n"
+        f"Summarize what you find in 3-5 sentences. "
+        f"Focus on factual information only."
     )
 
-    raw_text = response.text or ""
+    try:
+        grounding_tool = types.Tool(google_search=types.GoogleSearch())
 
-    # ── 검색 출처 추출 ────────────────────────────────────
-    search_sources = _extract_grounding_sources(response)
+        response = get_client().models.generate_content(
+            model=FACT_CHECK_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[grounding_tool],
+                temperature=0.1,
+                max_output_tokens=1024,
+            ),
+        )
 
-    # ── JSON 파싱 ─────────────────────────────────────────
-    result = _parse_fact_check_json(raw_text)
-    result["search_sources"] = search_sources
+        # ── 응답 텍스트 안전하게 추출 ────────────────────
+        context_text = _safe_extract_text(response)
 
-    return result
+        # ── 출처 추출 ─────────────────────────────────────
+        sources = _extract_grounding_sources(response)
+
+        print(f"[1단계] 검색 완료 — 컨텍스트 {len(context_text)}자, "
+              f"출처 {len(sources)}개")
+        return context_text, sources, True
+
+    except Exception as e:
+        print(f"[1단계] Search Grounding 실패 ({e}), 컨텍스트 없이 진행")
+        return "", [], False
+
+
+def _safe_extract_text(response) -> str:
+    """
+    Gemini 응답에서 텍스트를 안전하게 추출.
+    response.text 가 None 인 경우 parts에서 직접 수집.
+    """
+    # 방법 1: response.text 직접 접근
+    try:
+        if response.text:
+            return response.text
+    except Exception:
+        pass
+
+    # 방법 2: candidates → content → parts 순회
+    try:
+        parts_text = []
+        for candidate in (response.candidates or []):
+            content = getattr(candidate, "content", None)
+            if not content:
+                continue
+            for part in (getattr(content, "parts", []) or []):
+                t = getattr(part, "text", None)
+                if t:
+                    parts_text.append(t)
+        return " ".join(parts_text)
+    except Exception as e:
+        print(f"[텍스트 추출] 오류: {e}")
+        return ""
 
 
 def _extract_grounding_sources(response) -> list:
-    """
-    Gemini grounding 메타데이터에서 검색 출처 URL 목록 추출.
-    """
+    """Gemini grounding 메타데이터에서 출처 URL 추출"""
     sources = []
     try:
-        metadata = (
-            response.candidates[0]
-            .grounding_metadata
-            if response.candidates else None
-        )
+        candidate = (response.candidates or [None])[0]
+        if not candidate:
+            return sources
+
+        metadata = getattr(candidate, "grounding_metadata", None)
         if not metadata:
             return sources
 
@@ -212,83 +199,122 @@ def _extract_grounding_sources(response) -> list:
     except Exception as e:
         print(f"[출처 추출] 오류: {e}")
 
-    return sources[:5]  # 최대 5개
+    return sources[:5]
 
 
 # ─────────────────────────────────────────────────────────
-# 폴백: 기존 방식 (Search Grounding 없음)
+# 2단계: 수집된 컨텍스트로 JSON 팩트체크 생성
 # ─────────────────────────────────────────────────────────
 
-def _run_basic_fact_check(
+def _generate_fact_check_json(
     title: str,
     text: str,
     today: str,
     comment: str,
+    search_context: str,
 ) -> dict:
-    """Search Grounding 없이 Gemini 지식만으로 팩트체크 (폴백)"""
-    from utils.gemini_client import generate_post, parse_json_response
+    """
+    Search Grounding 없이 순수 JSON 생성.
+    response_mime_type="application/json" 사용 가능 → 파싱 오류 없음.
+    1단계에서 수집한 검색 컨텍스트를 프롬프트에 포함.
+    """
+    client = get_client()
+
+    # 검색 컨텍스트가 있으면 포함, 없으면 학습 데이터 기반임을 명시
+    if search_context:
+        context_block = (
+            f"\n[Real-time Search Results from Google - {today}]\n"
+            f"{search_context}\n"
+        )
+    else:
+        context_block = (
+            "\n[Note: Real-time search unavailable. "
+            "Analysis based on training data only.]\n"
+        )
 
     prompt = f"""You are a professional fact-checker for financial and market news.
-
 Today: {today}
+{context_block}
 Article Title: {title}
-Article Content (first 3000 chars):
-{text}
-
+Article Content:
+{text[:2500]}
 {"User comment: " + comment if comment else ""}
 
-TASK: Analyze this article based on your training knowledge.
-Note: You cannot access real-time data in this mode.
+Based on the search results above (if available) and your knowledge, fact-check this article.
 
 OUTPUT — ONLY valid JSON:
 {{
   "verdict": "VERIFIED|MOSTLY_TRUE|MIXED|UNVERIFIED|FALSE",
   "credibility_score": <integer 0-100>,
   "key_claims": [
-    {{"claim": "...", "status": "VERIFIED|FALSE|UNVERIFIABLE", "search_note": "based on training data only"}}
+    {{"claim": "claim from article", "status": "VERIFIED|FALSE|UNVERIFIABLE", "note": "evidence"}}
   ],
   "issues": ["지적사항1 (한글로 작성)", "지적사항2 (한글로 작성)"],
-  "related_information": "관련 시장 동향 2-3문장 (한글로 작성, 실시간 검색 미사용)",
-  "blog_angle": "Suggested angle/hook for the blog post",
+  "related_information": "검색으로 확인된 관련 최신 시장 동향 2-3문장 (한글로 작성)",
+  "blog_angle": "Suggested angle/hook for the blog post in English",
   "proceed_to_publish": <true if credibility_score >= 60 and verdict != "FALSE">,
-  "summary_for_blog": "3-4 sentence summary of verified facts for blog writing"
+  "summary_for_blog": "3-4 sentence summary of verified facts in English"
 }}"""
 
-    raw    = generate_post(prompt)
-    result = parse_json_response(raw)
-    return result
+    response = client.models.generate_content(
+        model=FACT_CHECK_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",   # JSON 전용 → 파싱 안전
+            temperature=0.1,
+            max_output_tokens=2048,
+        ),
+    )
+
+    raw = _safe_extract_text(response)
+    if not raw:
+        raise ValueError("2단계 응답이 비어 있습니다.")
+
+    return _parse_json_safe(raw)
 
 
 # ─────────────────────────────────────────────────────────
-# JSON 파싱
+# JSON 파싱 + 폴백
 # ─────────────────────────────────────────────────────────
 
-def _parse_fact_check_json(raw: str) -> dict:
-    """Gemini 응답에서 JSON 파싱 (마크다운 코드블록 처리 포함)"""
+def _parse_json_safe(raw: str) -> dict:
+    """JSON 파싱 — 마크다운 코드블록, 앞뒤 텍스트 제거 후 파싱"""
     raw = raw.strip()
-    raw = re.sub(r'^```json\s*', '', raw)
-    raw = re.sub(r'\s*```$',    '', raw)
+    # ```json ... ``` 코드블록 제거
+    raw = re.sub(r'^```json\s*', '', raw, flags=re.MULTILINE)
+    raw = re.sub(r'^```\s*',     '', raw, flags=re.MULTILINE)
+    raw = re.sub(r'```\s*$',     '', raw, flags=re.MULTILINE)
     raw = raw.strip()
 
+    # 직접 파싱 시도
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        m = re.search(r'\{.*\}', raw, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group())
-            except Exception:
-                pass
+        pass
 
-    # 파싱 실패 시 기본값 반환
-    print(f"[팩트체크] JSON 파싱 실패, 기본값 반환. 원본: {raw[:200]}")
+    # JSON 블록만 추출 후 재시도
+    m = re.search(r'\{[\s\S]*\}', raw)
+    if m:
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            pass
+
+    print(f"[JSON 파싱] 실패. 원본 앞 300자: {raw[:300]}")
+    raise ValueError(f"JSON 파싱 불가: {raw[:100]}")
+
+
+def _fallback_result(error_msg: str = "") -> dict:
+    """모든 시도 실패 시 반환하는 기본 결과 (게시 중단)"""
     return {
-        "verdict": "UNVERIFIED",
-        "credibility_score": 50,
-        "key_claims": [],
-        "issues": ["응답 파싱 오류"],
-        "related_information": "파싱 오류로 정보를 가져오지 못했습니다.",
-        "blog_angle": "",
+        "verdict":            "UNVERIFIED",
+        "credibility_score":  0,
+        "key_claims":         [],
+        "issues":             [f"팩트체크 오류: {error_msg[:80]}"],
+        "related_information": "팩트체크 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+        "blog_angle":         "",
         "proceed_to_publish": False,
-        "summary_for_blog": "",
+        "summary_for_blog":   "",
+        "search_sources":     [],
+        "grounding_used":     False,
     }
