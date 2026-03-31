@@ -3,7 +3,8 @@
 scripts/telegram_post.py
 변경사항:
   - 원문 출처 표기 영문으로 변경
-  - 이미지: Unsplash 무료 API → Gemini Imagen → Pillow 폴백
+  - 이미지: Gemini Imagen (글 내용 기반 프롬프트) → Unsplash → Pillow 폴백
+  - get_post_image() 호출 시 post_data=post 전달 → 썸네일-글 내용 연관성 개선
 """
 
 import argparse
@@ -172,9 +173,16 @@ def run_publish(url: str, chat_id: str, bot: TelegramNotifier):
     # ── 포스트 생성 ───────────────────────────────────────
     post = generate_blog_post(data, article, url)
 
-    # ── 이미지 조달 (Unsplash → Gemini Imagen → Pillow) ──
+    # ── 이미지 조달 (Gemini Imagen → Unsplash → Pillow) ──
+    # ✅ post_data=post 전달: 글 제목·태그·본문 기반으로
+    #    thumbnail_prompt.py가 내용에 맞는 장면을 선택해
+    #    Gemini Imagen 프롬프트를 구성함 → 썸네일 연관성 개선
     filename   = f"telegram_{datetime.now(KST).strftime('%Y%m%d_%H%M')}"
-    image_path = get_post_image(post_data=post, article=article, filename=filename)
+    image_path = get_post_image(
+        post_data=post,
+        article=article,
+        filename=filename,
+    )
 
     # ── 원문 출처 표기 (영문) ─────────────────────────────
     source_domain = article.get("source", "")
