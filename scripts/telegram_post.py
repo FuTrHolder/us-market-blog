@@ -3,14 +3,15 @@
 scripts/telegram_post.py
 변경사항:
   - 원문 출처 표기 영문으로 변경
-  - 이미지: Gemini Imagen (글 내용 기반 프롬프트) → Unsplash → Pillow 폴백
-  - get_post_image() 호출 시 post_data=post 전달 → 썸네일-글 내용 연관성 개선
+  - 이미지: Unsplash 무료 API → Gemini Imagen → Pillow 폴백
+  - Publishing cancelled 시 sys.exit(0) 으로 정상 종료
+    → GitHub workflow 실패 처리 안 됨 → 실패 알림 메일 발송 안 됨
+  - result 파일의 proceed 플래그로 게시 단계 자동 스킵
 """
 
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -58,7 +59,9 @@ def run_fact_check(url: str, chat_id: str, comment: str, bot: TelegramNotifier):
             "• Access blocked\n\n"
             "Please try a different article link."
         )
-        sys.exit(1)
+        # ✅ exit(0): 정상 종료 → GitHub 실패 메일 없음
+        _save_cancelled()
+        sys.exit(0)
 
     bot.send(chat_id,
         f"✅ Article loaded\n"
@@ -103,10 +106,14 @@ def run_fact_check(url: str, chat_id: str, comment: str, bot: TelegramNotifier):
             "The article has low credibility or contains inaccurate information.\n"
             "Please try a different source."
         )
+        # ✅ exit(0): 정상 종료 → GitHub 실패 메일 없음
+        # proceed=false 저장 → 게시 단계가 조건문으로 자동 스킵
         RESULT_FILE.write_text(
-            json.dumps({**fact_result, "article": article}, ensure_ascii=False, indent=2)
+            json.dumps({**fact_result, "article": article, "proceed": False},
+                       ensure_ascii=False, indent=2),
+            encoding="utf-8"
         )
-        sys.exit(1)
+        sys.exit(0)
 
     bot.send(chat_id,
         "✅ <b>Fact-check passed!</b>\n\n"
@@ -114,7 +121,8 @@ def run_fact_check(url: str, chat_id: str, comment: str, bot: TelegramNotifier):
     )
 
     RESULT_FILE.write_text(
-        json.dumps({**fact_result, "article": article}, ensure_ascii=False, indent=2),
+        json.dumps({**fact_result, "article": article, "proceed": True},
+                   ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
     print(f"[Fact-check] Done — verdict={verdict}, score={score}, proceed={proceed}")
@@ -165,24 +173,23 @@ OUTPUT — ONLY valid JSON:
 def run_publish(url: str, chat_id: str, bot: TelegramNotifier):
     if not RESULT_FILE.exists():
         bot.send(chat_id, "❌ Fact-check result file not found.")
-        sys.exit(1)
+        sys.exit(0)
 
     data    = json.loads(RESULT_FILE.read_text(encoding="utf-8"))
+
+    # proceed=False 면 게시 없이 정상 종료
+    if not data.get("proceed", False):
+        print("[Publish] proceed=False — 게시 스킵 (정상 종료)")
+        sys.exit(0)
+
     article = data.get("article", {})
 
     # ── 포스트 생성 ───────────────────────────────────────
     post = generate_blog_post(data, article, url)
 
-    # ── 이미지 조달 (Gemini Imagen → Unsplash → Pillow) ──
-    # ✅ post_data=post 전달: 글 제목·태그·본문 기반으로
-    #    thumbnail_prompt.py가 내용에 맞는 장면을 선택해
-    #    Gemini Imagen 프롬프트를 구성함 → 썸네일 연관성 개선
+    # ── 이미지 조달 (Unsplash → Gemini Imagen → Pillow) ──
     filename   = f"telegram_{datetime.now(KST).strftime('%Y%m%d_%H%M')}"
-    image_path = get_post_image(
-        post_data=post,
-        article=article,
-        filename=filename,
-    )
+    image_path = get_post_image(post_data=post, article=article, filename=filename)
 
     # ── 원문 출처 표기 (영문) ─────────────────────────────
     source_domain = article.get("source", "")
@@ -278,6 +285,18 @@ OUTPUT — ONLY valid JSON:
 
     raw = generate_post(prompt)
     return parse_json_response(raw)
+
+
+# ─────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────
+
+def _save_cancelled():
+    """게시 취소 시 proceed=False 파일 저장"""
+    RESULT_FILE.write_text(
+        json.dumps({"proceed": False, "article": {}}, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
 
 
 def _build_image_credit_html(image_path: str) -> str:
